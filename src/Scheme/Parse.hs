@@ -1,25 +1,19 @@
-module Lib
+module Scheme.Parse
     ( readExpr
     )
 where
 
+import           Scheme
+import           Control.Monad
+import           Control.Monad.Except
 import           Text.ParserCombinators.Parsec
                                          hiding ( spaces )
-import           System.Environment
-import           Control.Monad
-
-data LispVal = Atom String
-             | List [LispVal]
-             | DottedList [LispVal] LispVal
-             | Number Integer
-             | String String
-             | Bool Bool
 
 
-readExpr :: String -> String
+readExpr :: String -> ThrowsError LispVal
 readExpr input = case parse parseExpr "lisp" input of
-    Left  err -> "No match: " ++ show err
-    Right val -> "Found value"
+    Left  err -> throwError $ ParseError err
+    Right val -> return val
 
 
 parseExpr :: Parser LispVal
@@ -44,7 +38,7 @@ parseDottedList = do
 parseAtom :: Parser LispVal
 parseAtom = do
     first <- letter <|> symbol
-    rest  <- many (letter <|> digit <|> digit)
+    rest  <- many (letter <|> digit <|> symbol)
     let atom = first : rest
     return $ case atom of
         "#t" -> Bool True
@@ -56,7 +50,6 @@ parseNumber :: Parser LispVal
 parseNumber = do
     num <- fmap read $ many1 digit
     return $ Number num
-
 
 
 parseString :: Parser LispVal
@@ -77,6 +70,7 @@ parseQuoted = do
 -- | Strip whitepace, throws out one or more spaces
 spaces :: Parser ()
 spaces = skipMany1 space
+
 
 symbol :: Parser Char
 symbol = oneOf "!#$%&|*+-/:<=>?@^_~"

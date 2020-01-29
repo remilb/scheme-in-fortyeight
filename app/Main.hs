@@ -1,10 +1,14 @@
 module Main where
 
+import           Scheme
+import           Scheme.Parse
+import           Scheme.Eval
 import           System.Environment
-import Lib
+import           Control.Monad
+
 
 main :: IO ()
 main = do
-    (expr:_) <- getArgs
-    putStrLn $ readExpr expr
-    return ()
+    args   <- getArgs
+    evaled <- return $ liftM show $ readExpr (head args) >>= eval
+    putStrLn $ extractValue $ trapError evaled
