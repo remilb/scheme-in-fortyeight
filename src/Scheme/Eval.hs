@@ -1,7 +1,11 @@
+{-# LANGUAGE ExistentialQuantification #-}
+
 module Scheme.Eval where
 
 import           Scheme
 import           Control.Monad.Except
+
+data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
 
 -- trapError :: ThrowsError a -> ThrowsError String
 trapError err = catchError err (return . show)
@@ -66,6 +70,16 @@ eqv [_, _]     = return $ Bool False
 eqv badArgList = throwError $ NumArgs 2 badArgList
 
 
+equal :: [LispVal] -> ThrowsError LispVal
+equal [arg1, arg2] = do
+    primitiveEquals <- liftM or $ mapM
+        (unpackEquals arg1 arg2)
+        [AnyUnpacker unpackNum, AnyUnpacker unpackStr, AnyUnpacker unpackBool]
+    eqvEquals <- eqv [arg1, arg2]
+    return $ Bool $ (primitiveEquals || let (Bool x) = eqvEquals in x)
+equal badArgList = throwError $ NumArgs 2 badArgList
+
+
 apply :: String -> [LispVal] -> ThrowsError LispVal
 apply func args =
     maybe
@@ -98,6 +112,12 @@ primitives =
     , ("string>?" , strBoolBinop (>))
     , ("string<=?", strBoolBinop (<=))
     , ("string>=?", strBoolBinop (>=))
+    , ("car"      , car)
+    , ("cdr"      , cdr)
+    , ("cons"     , cons)
+    , ("eq?"      , eqv)
+    , ("eqv?"     , eqv)
+    , ("equal?"   , equal)
     ]
 
 
@@ -146,3 +166,12 @@ unpackStr notStr     = throwError $ TypeMismatch "string" notStr
 unpackBool :: LispVal -> ThrowsError Bool
 unpackBool (Bool b) = return b
 unpackBool notBool  = throwError $ TypeMismatch "boolean" notBool
+
+
+unpackEquals :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
+unpackEquals arg1 arg2 (AnyUnpacker unpacker) =
+    do
+            res1 <- unpacker arg1
+            res2 <- unpacker arg2
+            return $ res1 == res2
+        `catchError` (const $ return False)
