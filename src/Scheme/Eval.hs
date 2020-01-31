@@ -4,6 +4,7 @@ module Scheme.Eval where
 
 import           Scheme
 import           Control.Monad.Except
+import           Data.IORef
 
 data Unpacker = forall a. Eq a => AnyUnpacker (LispVal -> ThrowsError a)
 
@@ -13,18 +14,25 @@ trapError err = catchError err (return . show)
 extractValue :: ThrowsError a -> a
 extractValue (Right val) = val
 
-eval :: LispVal -> ThrowsError LispVal
-eval val@(String _                             ) = return val
-eval val@(Number _                             ) = return val
-eval val@(Bool   _                             ) = return val
-eval (    List   [Atom "quote", val]           ) = return val
-eval (    List   [Atom "if", pred, conseq, alt]) = do
-    result <- eval pred
+eval :: Env -> LispVal -> IOThrowsError LispVal
+eval env val@(String _                             ) = return val
+eval env val@(Number _                             ) = return val
+eval env val@(Bool   _                             ) = return val
+eval env (Atom id) = getVar env id
+eval env (    List   [Atom "quote", val]           ) = return val
+eval env (    List   [Atom "if", pred, conseq, alt]) = do
+    result <- eval env pred
     case result of
-        Bool False -> eval alt
-        otherwise  -> eval conseq
-eval (List (Atom func : args)) = mapM eval args >>= apply func
-eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
+        Bool False -> eval env alt
+        otherwise  -> eval env conseq
+eval env (List [Atom "set!", Atom var, form]) =
+    eval env form >>= setVar env var
+eval env (List [Atom "define", Atom var, form]) =
+    eval env form >>= defineVar env var
+eval env (List (Atom func : args)) =
+    mapM (eval env) args >>= liftThrows . apply func
+eval env badForm =
+    throwError $ BadSpecialForm "Unrecognized special form" badForm
 
 
 car :: [LispVal] -> ThrowsError LispVal
@@ -175,3 +183,63 @@ unpackEquals arg1 arg2 (AnyUnpacker unpacker) =
             res2 <- unpacker arg2
             return $ res1 == res2
         `catchError` (const $ return False)
+
+
+{- ### Mutable Variables Stuff  ### -}
+
+type Env = IORef [(String, IORef LispVal)]
+
+nullEnv :: IO Env
+nullEnv = newIORef []
+
+isBound :: Env -> String -> IO Bool
+isBound env name = do
+    bindings <- readIORef env
+    return $ any ((== name) . fst) bindings
+
+getVar :: Env -> String -> IOThrowsError LispVal
+getVar env name = do
+    bindings <- liftIO $ readIORef env
+    maybe
+        (throwError $ UnboundVar "Getting an unbound variable with name: " name)
+        (liftIO . readIORef)
+        (lookup name bindings)
+
+
+setVar :: Env -> String -> LispVal -> IOThrowsError LispVal
+setVar env name value = do
+    bindings <- liftIO $ readIORef env
+    maybe (throwError $ UnboundVar "Setting an unbound variable: " name)
+          (liftIO . (flip writeIORef value))
+          (lookup name bindings)
+    return value
+
+defineVar :: Env -> String -> LispVal -> IOThrowsError LispVal
+defineVar env name value = do
+    alreadyDefined <- liftIO $ isBound env name
+    if alreadyDefined
+        then setVar env name value >> return value
+        else liftIO $ do
+            valueRef <- newIORef value
+            bindings <- readIORef env
+            writeIORef env ((name, valueRef) : bindings)
+            return value
+
+bindVars :: Env -> [(String, LispVal)] -> IO Env
+bindVars env bindings = readIORef env >>= extendEnv bindings >>= newIORef
+  where
+    extendEnv bindings env = liftM (++ env) (mapM addBinding bindings)
+    addBinding (name, value) = do
+        ref <- newIORef value
+        return (name, ref)
+
+
+
+type IOThrowsError = ExceptT LispError IO
+
+runIOThrows :: IOThrowsError String -> IO String
+runIOThrows action = runExceptT (trapError action) >>= return . extractValue
+
+liftThrows :: ThrowsError a -> IOThrowsError a
+liftThrows (Left  err) = throwError err
+liftThrows (Right val) = return val

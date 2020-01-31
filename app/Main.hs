@@ -1,14 +1,16 @@
 module Main where
 
-import           Scheme
-import           Scheme.Parse
-import           Scheme.Eval
+
+import           Repl
 import           System.Environment
 import           Control.Monad
 
 
 main :: IO ()
 main = do
-    args   <- getArgs
-    evaled <- return $ liftM show $ readExpr (head args) >>= eval
-    putStrLn $ extractValue $ trapError evaled
+    args <- getArgs
+    case length args of
+        0 -> runRepl
+        1 -> runOne (head args)
+        _ -> putStrLn "Program takes 0 or 1 argument"
+
