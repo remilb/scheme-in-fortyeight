@@ -1,5 +1,6 @@
 module Scheme.Parse
     ( readExpr
+    , readExprList
     )
 where
 
@@ -9,12 +10,16 @@ import           Control.Monad.Except
 import           Text.ParserCombinators.Parsec
                                          hiding ( spaces )
 
-
-readExpr :: String -> ThrowsError LispVal
-readExpr input = case parse parseExpr "lisp" input of
+readOrThrow :: Parser a -> String -> ThrowsError a
+readOrThrow parser input = case parse parser "lisp" input of
     Left  err -> throwError $ ParseError err
     Right val -> return val
 
+readExpr :: String -> ThrowsError LispVal
+readExpr = readOrThrow parseExpr
+
+readExprList :: String -> ThrowsError [LispVal]
+readExprList = readOrThrow (endBy parseExpr spaces)
 
 parseExpr :: Parser LispVal
 parseExpr = parseAtom <|> parseString <|> parseNumber <|> parseQuoted <|> do

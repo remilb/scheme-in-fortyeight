@@ -1,13 +1,9 @@
-module Scheme
-    ( LispVal(..)
-    , LispError(..)
-    , Env
-    , ThrowsError
-    )
-where
+module Scheme where
 
 import           Text.ParserCombinators.Parsec  ( ParseError )
+import           Control.Monad.Except
 import           Data.IORef
+import           System.IO                      ( Handle )
 
 data LispVal = Atom String
             | List [LispVal]
@@ -18,6 +14,8 @@ data LispVal = Atom String
             | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
             | Func {params :: [String], vararg :: (Maybe String),
                     body :: [LispVal], closure :: Env}
+            | IOFunc ([LispVal] -> IOThrowsError LispVal)
+            | Port Handle
 
 data LispError = NumArgs Integer [LispVal]
             | TypeMismatch String LispVal
@@ -30,6 +28,22 @@ data LispError = NumArgs Integer [LispVal]
 type Env = IORef [(String, IORef LispVal)]
 
 type ThrowsError = Either LispError
+
+type IOThrowsError = ExceptT LispError IO
+
+runIOThrows :: IOThrowsError String -> IO String
+runIOThrows action = runExceptT (trapError action) >>= return . extractValue
+
+liftThrows :: ThrowsError a -> IOThrowsError a
+liftThrows (Left  err) = throwError err
+liftThrows (Right val) = return val
+
+
+trapError err = catchError err (return . show)
+
+extractValue :: ThrowsError a -> a
+extractValue (Right val) = val
+
 
 -- I belive this is technically an abuse of Show
 instance Show LispVal where
@@ -46,13 +60,18 @@ showVal (Number n   ) = show n
 showVal (Bool   b   ) = if b then "#t" else "#f"
 showVal (DottedList head tail) =
     "(" ++ unwordsList head ++ " . " ++ showVal tail ++ ")"
-showVal (List vals) = "(" ++ unwordsList vals ++ ")"
+showVal (List          vals) = "(" ++ unwordsList vals ++ ")"
 showVal (PrimitiveFunc prim) = "<primitive>"
 showVal (Func params vararg body closure) =
-    "(lambda (" ++ unwords (map show params) ++ 
-        (case vararg of
-            Nothing -> ""
-            Just arg -> " . " ++ arg) ++ ") ...)"
+    "(lambda ("
+        ++ unwords (map show params)
+        ++ (case vararg of
+               Nothing  -> ""
+               Just arg -> " . " ++ arg
+           )
+        ++ ") ...)"
+showVal (Port   _) = "<IO port>"
+showVal (IOFunc _) = "<IO primitive>"
 
 
 showError :: LispError -> String

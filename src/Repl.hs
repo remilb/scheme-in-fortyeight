@@ -12,11 +12,20 @@ import           Scheme
 import           Scheme.Eval
 import           Scheme.Parse
 
-runOne :: String -> IO ()
-runOne expr = primitiveBindings >>= flip evalAndPrint expr
+runOne :: [String] -> IO ()
+runOne args = do
+    env <- primitiveBindings
+        >>= flip bindVars [("args", List $ map String $ drop 1 args)]
+    result <- runIOThrows $ liftM show $ eval
+        env
+        (List [Atom "load", String (head args)])
+    hPutStrLn stderr result
 
 runRepl :: IO ()
-runRepl = primitiveBindings >>= until_ (== ":q") (readPrompt "Scheme>>> ") . evalAndPrint
+runRepl =
+    primitiveBindings
+        >>= until_ (== ":q") (readPrompt "Scheme>>> ")
+        .   evalAndPrint
 
 evalAndPrint :: Env -> String -> IO ()
 evalAndPrint env str = evalString env str >>= putStrLn
