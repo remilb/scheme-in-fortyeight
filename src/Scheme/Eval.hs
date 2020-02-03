@@ -26,6 +26,10 @@ eval env (List [Atom "set!", Atom var, form]) =
 eval env (List [Atom "define", Atom var, form]) =
     eval env form >>= defineVar env var
 
+-- Load is a special form because it can introduce new bindings
+eval env (List [Atom "load", String filename]) =
+    load filename >>= liftM last . mapM (eval env)
+
 -- Function definition
 eval env (List (Atom "define" : List (Atom var : params) : body)) =
     makeNormalFunc env params body >>= defineVar env var
@@ -43,10 +47,6 @@ eval env (List (function : args)) = do
     func    <- eval env function
     argVals <- mapM (eval env) args
     apply func argVals
-
--- Load is a special form because it can introduce new bindings
-eval env (List [Atom "load", String filename]) =
-    load filename >>= liftM last . mapM (eval env)
 
 eval env badForm =
     throwError $ BadSpecialForm "Unrecognized special form" badForm
