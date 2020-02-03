@@ -1,11 +1,13 @@
 module Scheme
     ( LispVal(..)
     , LispError(..)
+    , Env
     , ThrowsError
     )
 where
 
 import           Text.ParserCombinators.Parsec  ( ParseError )
+import           Data.IORef
 
 data LispVal = Atom String
             | List [LispVal]
@@ -13,6 +15,9 @@ data LispVal = Atom String
             | Number Integer
             | String String
             | Bool Bool
+            | PrimitiveFunc ([LispVal] -> ThrowsError LispVal)
+            | Func {params :: [String], vararg :: (Maybe String),
+                    body :: [LispVal], closure :: Env}
 
 data LispError = NumArgs Integer [LispVal]
             | TypeMismatch String LispVal
@@ -21,6 +26,8 @@ data LispError = NumArgs Integer [LispVal]
             | NotFunction String String
             | UnboundVar String String
             | Default String
+
+type Env = IORef [(String, IORef LispVal)]
 
 type ThrowsError = Either LispError
 
@@ -40,6 +47,12 @@ showVal (Bool   b   ) = if b then "#t" else "#f"
 showVal (DottedList head tail) =
     "(" ++ unwordsList head ++ " . " ++ showVal tail ++ ")"
 showVal (List vals) = "(" ++ unwordsList vals ++ ")"
+showVal (PrimitiveFunc prim) = "<primitive>"
+showVal (Func params vararg body closure) =
+    "(lambda (" ++ unwords (map show params) ++ 
+        (case vararg of
+            Nothing -> ""
+            Just arg -> " . " ++ arg) ++ ") ...)"
 
 
 showError :: LispError -> String
@@ -56,5 +69,3 @@ showError (UnboundVar     message varname) = message ++ ": " ++ varname
 
 unwordsList :: [LispVal] -> String
 unwordsList = unwords . map showVal
-
-

@@ -29,11 +29,30 @@ eval env (List [Atom "set!", Atom var, form]) =
     eval env form >>= setVar env var
 eval env (List [Atom "define", Atom var, form]) =
     eval env form >>= defineVar env var
-eval env (List (Atom func : args)) =
-    mapM (eval env) args >>= liftThrows . apply func
+
+-- Function definition
+eval env (List (Atom "define" : List (Atom var : params) : body)) = 
+    makeNormalFunc env params body >>= defineVar env var
+eval env (List (Atom "define" : DottedList (Atom var : params) varargs : body)) =
+    makeVarArgs varargs env params body >>= defineVar env var
+eval env (List (Atom "lambda" : List params : body)) =
+    makeNormalFunc env params body
+eval env (List (Atom "lambda" : DottedList params varargs : body)) =
+    makeVarArgs varargs env params body
+eval env (List (Atom "lambda" : varargs@(Atom _) : body)) =
+    makeVarArgs varargs env [] body
+-- Function application
+eval env (List (function : args)) = do
+    func <- eval env function
+    argVals <- mapM (eval env) args
+    apply func argVals
+
 eval env badForm =
     throwError $ BadSpecialForm "Unrecognized special form" badForm
 
+makeFunc varArgs env params body = return $ Func (map show params) varArgs body env
+makeNormalFunc = makeFunc Nothing
+makeVarArgs = makeFunc . Just . show
 
 car :: [LispVal] -> ThrowsError LispVal
 car [List (x : xs)        ] = return x
@@ -88,15 +107,23 @@ equal [arg1, arg2] = do
 equal badArgList = throwError $ NumArgs 2 badArgList
 
 
-apply :: String -> [LispVal] -> ThrowsError LispVal
-apply func args =
-    maybe
-            ( throwError
-            $ NotFunction "Unrecognized primitive function args" func
-            )
-            ($ args)
-        $ lookup func primitives
+apply :: LispVal -> [LispVal] -> IOThrowsError LispVal
+apply (PrimitiveFunc func) args = liftThrows $ func args
+apply (Func params varargs body closure) args = 
+    if num params /= num args && varargs == Nothing
+        then throwError $ NumArgs (num params) args
+        else (liftIO $ bindVars closure $ zip params args) >>= bindVarArgs varargs >>= evalBody
+    where
+        num = toInteger. length
+        evalBody env = liftM last $ mapM (eval env) body
+        bindVarArgs arg env = case arg of 
+                                    Just argName -> let vargs = drop (length params) args 
+                                                in liftIO $ bindVars env [(argName, List vargs)]
+                                    Nothing -> return env
 
+primitiveBindings :: IO Env
+primitiveBindings = nullEnv >>= (flip bindVars $ map makePrimitiveFunc primitives)
+    where makePrimitiveFunc (name, func) = (name, PrimitiveFunc func)
 
 primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives =
@@ -186,9 +213,6 @@ unpackEquals arg1 arg2 (AnyUnpacker unpacker) =
 
 
 {- ### Mutable Variables Stuff  ### -}
-
-type Env = IORef [(String, IORef LispVal)]
-
 nullEnv :: IO Env
 nullEnv = newIORef []
 

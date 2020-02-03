@@ -13,10 +13,10 @@ import           Scheme.Eval
 import           Scheme.Parse
 
 runOne :: String -> IO ()
-runOne expr = nullEnv >>= flip evalAndPrint expr
+runOne expr = primitiveBindings >>= flip evalAndPrint expr
 
 runRepl :: IO ()
-runRepl = nullEnv >>= until_ (== ":q") (readPrompt "Scheme>>> ") . evalAndPrint
+runRepl = primitiveBindings >>= until_ (== ":q") (readPrompt "Scheme>>> ") . evalAndPrint
 
 evalAndPrint :: Env -> String -> IO ()
 evalAndPrint env str = evalString env str >>= putStrLn
